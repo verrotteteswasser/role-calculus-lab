@@ -18,12 +18,19 @@ def cmd_t2(args):
     fs = n / T
     t = np.linspace(0, T, n, endpoint=False)
 
-    # Synthese mit ~0.8 Hz Grundband
-    x = np.gradient(np.sin(2*np.pi*0.8*t) + 0.5*np.sin(2*np.pi*2.0*t))
+    # Saubere Synthese mit gemeinsamer 0.8 Hz-Komponente
+    x = np.sin(2*np.pi*0.8*t) + 0.5*np.sin(2*np.pi*2.0*t)
     y = np.sin(2*np.pi*0.8*t + 0.6) + 0.1*np.random.default_rng(args.seed).normal(0,1,n)
 
-    # Coherence im Zielband um 0.8 Hz
-    res = coherence_band(x, y, fs=fs, band=(0.7, 0.9), nperseg=512, n_null=args.n_null, rng=args.seed)
+    # Breiteres Band + mehr Mittelung (kleineres nperseg => mehr Segmente)
+    res = coherence_band(
+        x, y,
+        fs=fs,
+        band=(0.6, 1.0),     # breiter um 0.8 Hz
+        nperseg=256,         # mehr Segmente -> stabilere Null
+        n_null=args.n_null,
+        rng=args.seed
+    )
 
     params = {k: v for k, v in vars(args).items() if k != "func"}
     out = {"params": params, "result": res}
