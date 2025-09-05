@@ -5,12 +5,25 @@ def _mscoh(x, y, fs=1.0, nperseg=512, noverlap=None):
     """
     Magnitude-squared coherence via Welch + CSD:
       Cxy(f) = |Pxy|^2 / (Pxx * Pyy)
+    Robust: passt nperseg/noverlap an die Signal-Länge an.
     """
+    n = int(min(len(x), len(y)))
+    nseg = int(min(nperseg, n))
+    # Mindestgröße, aber nicht größer als n
+    if nseg < 64:
+        nseg = max(32, min(n, nseg))
+
     if noverlap is None:
-        noverlap = nperseg // 2
-    f, Pxx = welch(x, fs=fs, nperseg=nperseg, noverlap=noverlap, detrend="constant")
-    _, Pyy = welch(y, fs=fs, nperseg=nperseg, noverlap=noverlap, detrend="constant")
-    _, Pxy = csd(x, y, fs=fs, nperseg=nperseg, noverlap=noverlap, detrend="constant")
+        ov = nseg // 2
+    else:
+        ov = int(noverlap)
+    # Overlap muss strikt kleiner als nperseg sein
+    ov = max(0, min(ov, nseg - 1))
+
+    f, Pxx = welch(x, fs=fs, nperseg=nseg, noverlap=ov, detrend="constant")
+    _, Pyy = welch(y, fs=fs, nperseg=nseg, noverlap=ov, detrend="constant")
+    _, Pxy = csd(x, y, fs=fs, nperseg=nseg, noverlap=ov, detrend="constant")
+
     C = (np.abs(Pxy) ** 2) / (Pxx * Pyy + 1e-12)
     C = np.clip(C.real, 0.0, 1.0)
     return f, C

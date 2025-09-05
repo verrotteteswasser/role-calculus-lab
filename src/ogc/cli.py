@@ -13,6 +13,7 @@ def cmd_t1(args):
     print(json.dumps(out, indent=2))
 
 def cmd_t2(args):
+    import json
     import numpy as np
     from scipy.signal import resample_poly
     from ogc.t2_crosscoherence import coherence_band
@@ -23,8 +24,9 @@ def cmd_t2(args):
     t = np.linspace(0, T, n, endpoint=False)
 
     # Synthese: gemeinsame ~0.8 Hz-Komponente
+    rng = np.random.default_rng(args.seed)
     x = np.sin(2*np.pi*0.8*t) + 0.5*np.sin(2*np.pi*2.0*t)
-    y = np.sin(2*np.pi*0.8*t + 0.6) + 0.1*np.random.default_rng(args.seed).normal(0, 1, n)
+    y = np.sin(2*np.pi*0.8*t + 0.6) + 0.1 * rng.normal(0, 1, n)
 
     # --- Downsampling auf ~20 Hz (Anti-Alias via resample_poly) ---
     target_fs = 20.0
@@ -33,8 +35,12 @@ def cmd_t2(args):
     y_ds = resample_poly(y, up=1, down=decim)
     fs_ds = fs / decim
 
-    # Welch-Parameter: df ~ 0.04 Hz (512er Segmente bei 20 Hz)
-    nperseg = 512
+    # nperseg aus Ziel-df (~0.05 Hz) ableiten und an Länge kappen
+    target_df = 0.05                     # ≈ 0.05 Hz Auflösung
+    nperseg = int(round(fs_ds / target_df))
+    nperseg = max(128, min(nperseg, len(x_ds)))    # nicht größer als Signal
+    if nperseg % 2 == 1:
+        nperseg += 1                     # gerade Zahl
 
     res = coherence_band(
         x_ds, y_ds,
