@@ -13,6 +13,10 @@ def cmd_t1(args):
     print(json.dumps(out, indent=2))
 
 def cmd_t2(args):
+    import numpy as np
+    from scipy.signal import resample_poly
+    from ogc.t2_crosscoherence import coherence_band
+
     n = args.n
     T = 10.0
     fs = n / T
@@ -22,18 +26,20 @@ def cmd_t2(args):
     x = np.sin(2*np.pi*0.8*t) + 0.5*np.sin(2*np.pi*2.0*t)
     y = np.sin(2*np.pi*0.8*t + 0.6) + 0.1*np.random.default_rng(args.seed).normal(0,1,n)
 
-    # Ziel-Auflösung ~0.1 Hz, aber nperseg kappen, damit wir mehrere Segmente haben
-    target_df = 0.1
-    nperseg_auto = int(round(fs / target_df))  # was theoretisch ideal wäre
-    nperseg = max(256, min(2048, nperseg_auto))  # <- KAPPE BEI 2048
-    if nperseg % 2 == 1:
-        nperseg += 1  # gerade Zahl
-    # noverlap 50% (ist in coherence_band/_mscoh schon default)
+    # --- NEU: Downsample auf ~20 Hz, anti-alias via resample_poly ---
+    target_fs = 20.0
+    decim = int(round(fs / target_fs))
+    decim = max(1, decim)
+    x_ds = resample_poly(x, up=1, down=decim)
+    y_ds = resample_poly(y, up=1, down=decim)
+    fs_ds = fs / decim
 
+    # Kohärenz im Band um 0.8 Hz; nperseg so wählen, dass df ~ 0.04 Hz
+    nperseg = 512  # df ≈ fs_ds / 512 ≈ 0.039 Hz
     res = coherence_band(
-        x, y,
-        fs=fs,
-        band=(0.6, 1.0),   # breit um 0.8 Hz
+        x_ds, y_ds,
+        fs=fs_ds,
+        band=(0.7, 0.9),   # enger um 0.8 Hz (jetzt mehrere Bins)
         nperseg=nperseg,
         n_null=args.n_null,
         rng=args.seed
