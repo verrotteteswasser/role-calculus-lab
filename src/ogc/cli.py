@@ -22,18 +22,18 @@ def cmd_t2(args):
     x = np.sin(2*np.pi*0.8*t) + 0.5*np.sin(2*np.pi*2.0*t)
     y = np.sin(2*np.pi*0.8*t + 0.6) + 0.1*np.random.default_rng(args.seed).normal(0,1,n)
 
-    # Ziel: df ≈ 0.1 Hz -> nperseg = fs/df
+    # Ziel-Auflösung ~0.1 Hz, aber nperseg kappen, damit wir mehrere Segmente haben
     target_df = 0.1
-    nperseg = int(max(256, min(n, round(fs / target_df))))
-    # nperseg muss gerade sein, und nicht größer als n
+    nperseg_auto = int(round(fs / target_df))  # was theoretisch ideal wäre
+    nperseg = max(256, min(2048, nperseg_auto))  # <- KAPPE BEI 2048
     if nperseg % 2 == 1:
-        nperseg += 1
-    noverlap = nperseg // 2
+        nperseg += 1  # gerade Zahl
+    # noverlap 50% (ist in coherence_band/_mscoh schon default)
 
     res = coherence_band(
         x, y,
         fs=fs,
-        band=(0.6, 1.0),     # um 0.8 Hz
+        band=(0.6, 1.0),   # breit um 0.8 Hz
         nperseg=nperseg,
         n_null=args.n_null,
         rng=args.seed
