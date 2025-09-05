@@ -1,14 +1,18 @@
 \
 import numpy as np
 
-def bistable_response(u, a=1.0, b=-1.0, c=1.0, noise=0.0, rng=None):
+def bistable_response(u, a=1.0, b=1.0, c=0.0, noise=0.0, rng=None):
+    """
+    Simple saturating cubic with relaxation; b>0 dämpft.
+    """
     rng = np.random.default_rng(rng)
     y = 0.0
     ys = []
     for ui in u:
-        for _ in range(20):
-            y = 0.9*y + 0.1*(a*ui - b*(y**3) + c)
-        if noise>0:
+        for _ in range(30):
+            y = 0.8*y + 0.2*(a*ui - b*(y**3) + c)
+            y = float(np.clip(y, -5.0, 5.0))  # sanfte Sättigung
+        if noise > 0:
             y += rng.normal(0, noise)
         ys.append(y)
     return np.array(ys)

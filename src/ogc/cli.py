@@ -8,7 +8,8 @@ from ogc.t3_hysteresis import simulate_hysteresis
 def cmd_t1(args):
     r, v_r, C_true = synthetic_stack(a=args.a, D=args.D, noise=args.noise, rng=args.seed)
     res = fit_t1(r, v_r, a=args.a, D=args.D)
-    out = {"params": vars(args), "result": res}
+    params = {k: v for k, v in vars(args).items() if k != "func"}
+    out = {"params": params, "result": res}
     print(json.dumps(out, indent=2))
 
 def cmd_t2(args):
@@ -17,12 +18,14 @@ def cmd_t2(args):
     x = np.gradient(np.sin(2*np.pi*0.8*t) + 0.5*np.sin(2*np.pi*2.0*t))
     y = np.sin(2*np.pi*0.8*t + 0.6) + 0.1*np.random.default_rng(args.seed).normal(0,1,n)
     res = coherence_band(x, y, rng=args.seed, n_null=args.n_null)
-    out = {"params": vars(args), "result": res}
+    params = {k: v for k, v in vars(args).items() if k != "func"}
+    out = {"params": params, "result": res}
     print(json.dumps(out, indent=2))
 
 def cmd_t3(args):
     res = simulate_hysteresis(n=args.n, u_min=args.u_min, u_max=args.u_max, noise=args.noise, rng=args.seed)
-    out = {"params": vars(args), "result": res}
+    params = {k: v for k, v in vars(args).items() if k != "func"}
+    out = {"params": params, "result": res}
     print(json.dumps(out, indent=2))
 
 def main():
