@@ -22,27 +22,28 @@ def cmd_t2(args):
     fs = n / T
     t = np.linspace(0, T, n, endpoint=False)
 
-    # gemeinsame ~0.8 Hz Quelle
+    # Synthese: gemeinsame ~0.8 Hz-Komponente
     x = np.sin(2*np.pi*0.8*t) + 0.5*np.sin(2*np.pi*2.0*t)
-    y = np.sin(2*np.pi*0.8*t + 0.6) + 0.1*np.random.default_rng(args.seed).normal(0,1,n)
+    y = np.sin(2*np.pi*0.8*t + 0.6) + 0.1*np.random.default_rng(args.seed).normal(0, 1, n)
 
-    # --- NEU: Downsample auf ~20 Hz, anti-alias via resample_poly ---
+    # --- Downsampling auf ~20 Hz (Anti-Alias via resample_poly) ---
     target_fs = 20.0
-    decim = int(round(fs / target_fs))
-    decim = max(1, decim)
+    decim = max(1, int(round(fs / target_fs)))
     x_ds = resample_poly(x, up=1, down=decim)
     y_ds = resample_poly(y, up=1, down=decim)
     fs_ds = fs / decim
 
-    # Kohärenz im Band um 0.8 Hz; nperseg so wählen, dass df ~ 0.04 Hz
-    nperseg = 512  # df ≈ fs_ds / 512 ≈ 0.039 Hz
+    # Welch-Parameter: df ~ 0.04 Hz (512er Segmente bei 20 Hz)
+    nperseg = 512
+
     res = coherence_band(
         x_ds, y_ds,
         fs=fs_ds,
-        band=(0.7, 0.9),   # enger um 0.8 Hz (jetzt mehrere Bins)
+        band=(0.7, 0.9),
         nperseg=nperseg,
         n_null=args.n_null,
-        rng=args.seed
+        rng=args.seed,
+        mode="mean"  # robuster als "peak"
     )
 
     params = {k: v for k, v in vars(args).items() if k != "func"}
