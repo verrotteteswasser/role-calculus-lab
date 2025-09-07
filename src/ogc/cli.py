@@ -11,7 +11,7 @@ def cmd_t2(args):
     from ogc.t2_crosscoherence import coherence_band
 
     n = args.n
-    T = 10.0
+    T = 30.0
     fs = n / T
     t = np.linspace(0, T, n, endpoint=False)
 
@@ -29,13 +29,13 @@ def cmd_t2(args):
     L = len(x_ds)
 
     # nperseg so wählen, dass mehrere Segmente entstehen (stabiles Welch)
-    K = 5                      # Ziel: ~5 Segmente
+    K = 6                      # Ziel: ~5 Segmente
     nperseg = max(128, (L // K))
     if nperseg % 2 == 1:
         nperseg += 1
 
     # Band so wählen, dass IMMER Bins drinliegen (0.6–1.0 Hz ist sicher)
-    band = (0.6, 1.0)
+    band = (0.7, 0.9)
 
     res = coherence_band(
     x_ds, y_ds,
@@ -45,7 +45,7 @@ def cmd_t2(args):
     n_null=args.n_null,
     rng=args.seed,
     mode="mean",
-    null_mode="flip",   # <— neu
+    null_mode="flip",   # <— wichtig
 )
 
 
