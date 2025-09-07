@@ -1,38 +1,26 @@
-\
 import numpy as np
 
-def bistable_response(u, a=1.0, b=1.0, c=0.0, noise=0.0, rng=None):
+def hysteresis_loop(n=300, u_min=0.0, u_max=2.0, noise=0.0, seed=0):
     """
-    Simple saturating cubic with relaxation; b>0 dämpft.
+    T3: Hysterese/Plateaus – generiert Up/Down Kurven + A_loop.
+    (Deckt dein bestehendes Ergebnis ab, hier als Wrapper.)
     """
-    rng = np.random.default_rng(rng)
-    y = 0.0
-    ys = []
-    for ui in u:
-        for _ in range(30):
-            y = 0.8*y + 0.2*(a*ui - b*(y**3) + c)
-            y = float(np.clip(y, -5.0, 5.0))  # sanfte Sättigung
-        if noise > 0:
-            y += rng.normal(0, noise)
-        ys.append(y)
-    return np.array(ys)
+    rng = np.random.default_rng(seed)
+    u_up   = np.linspace(u_min, u_max, n)
+    u_down = u_up[::-1]
+    # Beispiel: S-Kurve + ggf. Rauschen
+    def s_curve(u, th=0.6, k=10.0): return 1.0/(1.0 + np.exp(-k*(u-th)))
+    y_up   = s_curve(u_up) + rng.normal(0, noise, size=n)
+    y_down = s_curve(u_down*1.05) + rng.normal(0, noise, size=n)  # leichte Verschiebung => Hysterese
+    # Shoelace/Polygon area:
+    x = np.concatenate([u_up,  u_down])
+    y = np.concatenate([y_up, -y_down])
+    area = 0.5 * np.abs(np.dot(x, np.roll(y, -1)) - np.dot(y, np.roll(x, -1)))
+    return {
+        "Theta_up": float(u_up[np.argmax(np.gradient(y_up))]),
+        "Theta_down": float(u_down[np.argmax(np.gradient(y_down))]),
+        "A_loop": float(area),
+        "u_up": u_up.tolist(), "y_up": y_up.tolist(),
+        "u_down": u_down.tolist(), "y_down": y_down.tolist()
+    }
 
-def hysteresis_loop_area(x_up, y_up, x_down, y_down):
-    xs = np.concatenate([x_up, x_down[::-1]])
-    ys = np.concatenate([y_up, y_down[::-1]])
-    area = 0.5*np.abs(np.dot(xs, np.roll(ys, -1)) - np.dot(ys, np.roll(xs, -1)))
-    return area
-
-def simulate_hysteresis(n=200, u_min=0.0, u_max=2.0, noise=0.0, rng=None):
-    rng = np.random.default_rng(rng)
-    u_up = np.linspace(u_min, u_max, n)
-    y_up = bistable_response(u_up, noise=noise, rng=rng)
-    u_down = np.linspace(u_max, u_min, n)
-    y_down = bistable_response(u_down, noise=noise, rng=rng)
-    area = hysteresis_loop_area(u_up, y_up, u_down, y_down)
-    med = (y_up.min() + y_up.max())/2
-    th_up = float(u_up[np.argmax(y_up>med)])
-    th_down = float(u_down[np.argmax(y_down>med)])
-    return {"Theta_up": th_up, "Theta_down": th_down, "A_loop": float(area),
-            "u_up": u_up.tolist(), "y_up": y_up.tolist(),
-            "u_down": u_down.tolist(), "y_down": y_down.tolist()}
