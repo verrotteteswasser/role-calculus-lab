@@ -1,4 +1,25 @@
 import argparse, json
+import os, time
+
+def _ts():
+    return time.strftime("%Y%m%d-%H%M%S")
+
+def _ensure_dir(d):
+    if d and not os.path.isdir(d):
+        os.makedirs(d, exist_ok=True)
+
+def _save_json(payload, out_dir, subcmd):
+    """
+    Speichert payload als JSON unter:
+      {out_dir}/{subcmd}/{YYYYmmdd-HHMMSS}.json
+    und gibt den Pfad zurück.
+    """
+    folder = os.path.join(out_dir, subcmd)
+    _ensure_dir(folder)
+    path = os.path.join(folder, f"{_ts()}.json")
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
+    return path
 
 def _clean_params(args):
     """Entfernt nicht-serialisierbare Dinge (z.B. args.func) aus argparse-Params."""
@@ -15,7 +36,10 @@ def _clean_params(args):
 def cmd_t1(args):
     from ogc.tests.t1_orientation import orientation_identity
     res = orientation_identity(None, None)  # später echte Inputs
-    print(json.dumps({"params": _clean_params(args), "result": res}, ensure_ascii=False, indent=2))
+    out = {"params": _clean_params(args), "result": res}
+    print(json.dumps(out, ensure_ascii=False, indent=2))
+    save_path = _save_json(out, args.out_dir, "t1")
+    print(f'[saved] {save_path}')
 
 def cmd_t2(args):
     import numpy as np
@@ -68,16 +92,24 @@ def cmd_t2(args):
         "result": res
     }
     print(json.dumps(out, ensure_ascii=False, indent=2))
+    save_path = _save_json(out, args.out_dir, "t2")
+    print(f'[saved] {save_path}')
 
 def cmd_t3(args):
     from ogc.tests.t3_hysteresis import hysteresis_loop
     res = hysteresis_loop(n=args.n, u_min=args.u_min, u_max=args.u_max, noise=args.noise, seed=args.seed)
-    print(json.dumps({"params": _clean_params(args), "result": res}, ensure_ascii=False, indent=2))
+    out = {"params": _clean_params(args), "result": res}
+    print(json.dumps(out, ensure_ascii=False, indent=2))
+    save_path = _save_json(out, args.out_dir, "t3")
+    print(f'[saved] {save_path}')
 
 def cmd_s_margin(args):
     from ogc.tests.s_margin import safety_margin
     res = safety_margin(loss_rate=args.loss, window=args.window)
-    print(json.dumps({"params": _clean_params(args), "result": res}, ensure_ascii=False, indent=2))
+    out = {"params": _clean_params(args), "result": res}
+    print(json.dumps(out, ensure_ascii=False, indent=2))
+    save_path = _save_json(out, args.out_dir, "s_margin")
+    print(f'[saved] {save_path}')
 
 def cmd_split(args):
     from ogc.tests.split_persistence import split_persistence
@@ -85,7 +117,10 @@ def cmd_split(args):
     A = [float(v) for v in args.values_a.split(",")]
     B = [float(v) for v in args.values_b.split(",")]
     res = split_persistence(A, B, tol=args.tol)
-    print(json.dumps({"params": _clean_params(args), "result": res}, ensure_ascii=False, indent=2))
+    out = {"params": _clean_params(args), "result": res}
+    print(json.dumps(out, ensure_ascii=False, indent=2))
+    save_path = _save_json(out, args.out_dir, "split")
+    print(f'[saved] {save_path}')
 
 def cmd_cstar(args):
     from ogc.tests.cstar_longreturn import cstar_return_indicator
@@ -98,10 +133,15 @@ def cmd_cstar(args):
             base[k:min(k+3, args.n)] += 0.3
         base = np.clip(base, 0, 1)
     res = cstar_return_indicator(base, max_lag=args.max_lag, rng=args.seed)
-    print(json.dumps({"params": _clean_params(args), "result": res}, ensure_ascii=False, indent=2))
+    out = {"params": _clean_params(args), "result": res}
+    print(json.dumps(out, ensure_ascii=False, indent=2))
+    save_path = _save_json(out, args.out_dir, "cstar")
+    print(f'[saved] {save_path}')
 
 def main():
     p = argparse.ArgumentParser()
+    # globales Output-Verzeichnis (du hast „result/“ schon)
+    p.add_argument("--out-dir", type=str, default="result", help="Basisordner für JSON-Outputs")
     sub = p.add_subparsers()
 
     # T1
@@ -154,4 +194,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

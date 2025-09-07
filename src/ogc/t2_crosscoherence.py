@@ -42,48 +42,54 @@ def _phase_surrogate(sig, rng):
     Xs = amp * np.exp(1j * ph)
     return np.fft.irfft(Xs, n=len(sig))
 
-def coherence_band(
-    x, y, fs=1.0, band=(0.6, 1.0), nperseg=512, n_null=200, rng=None,
-    mode="mean",              # "mean" oder "peak"
-    null_mode="flip"          # "flip" (empfohlen) oder "phase"
-):
+# in t2_crosscoherence.py
+
+def coherence_band(x, y, fs=1.0, band=(0.6, 1.0), nperseg=512, n_null=200,
+                   rng=None, mode="peak", null_mode="flip", return_debug=False):
     rng = np.random.default_rng(rng)
 
     f, C = _mscoh(x, y, fs=fs, nperseg=nperseg)
     band_mask = (f >= band[0]) & (f <= band[1])
-    if not np.any(band_mask):
-        return {"stat": 0.0, "band_fraction": 0.0, "p_value": 1.0, "mode": mode, "null_mode": null_mode}
-
     C_band = C[band_mask]
-    stat_fn = np.max if mode == "peak" else np.mean
-    obs = float(stat_fn(C_band))
-    band_fraction = float(band_mask.mean())
 
-    null_vals = []
-    for _ in range(n_null):
+    if C_band.size == 0:
+        stat = 0.0
+    else:
+        if mode == "mean":
+            stat = float(C_band.mean())
+        else:
+            stat = float(C_band.max())
+
+    # Null-Verteilung
+    null_stats = np.empty(n_null, dtype=float)
+    for i in range(n_null):
         if null_mode == "phase":
             xs = _phase_surrogate(x, rng)
             ys = _phase_surrogate(y, rng)
-            _, Cn = _mscoh(xs, ys, fs=fs, nperseg=nperseg)
         else:
-            # Segment-Flip auf y
-            nseg = int(min(nperseg, len(y)))
-            if nseg < 64:
-                nseg = max(32, nseg)
-            ov = nseg // 2
-            ys = y.copy()
-            start = 0
-            step = max(1, nseg - ov)
-            while start < len(ys):
-                end = min(len(ys), start + nseg)
-                if rng.random() < 0.5:
-                    ys[start:end] *= -1.0
-                start += step
-            _, Cn = _mscoh(x, ys, fs=fs, nperseg=nperseg)
-
+            # "flip": zyklischer Random-Shift einer Serie -> zerstört Kopplung, erhält Spektren
+            shift = rng.integers(0, len(y))
+            ys = np.roll(y, shift)
+            xs = x
+        _, Cn = _mscoh(xs, ys, fs=fs, nperseg=nperseg)
         Cn_band = Cn[band_mask]
-        null_vals.append(float(stat_fn(Cn_band)))
+        null_stats[i] = (Cn_band.mean() if mode == "mean" else Cn_band.max()) if Cn_band.size else 0.0
 
-    null_vals = np.asarray(null_vals, dtype=float)
-    p_value = float((null_vals >= obs).mean())
-    return {"stat": obs, "band_fraction": band_fraction, "p_value": p_value, "mode": mode, "null_mode": null_mode}
+    p_value = float((null_stats >= stat).mean())
+    band_fraction = float(band_mask.mean())
+
+    out = {
+        "stat": stat,
+        "band_fraction": band_fraction,
+        "p_value": p_value,
+        "mode": mode,
+        "null_mode": null_mode,
+    }
+    if return_debug:
+        out["debug"] = {
+            "f": f.tolist(),
+            "C": C.tolist(),
+            "band_mask": band_mask.tolist(),
+            "null_stats": null_stats.tolist(),
+        }
+    return out
