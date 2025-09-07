@@ -6,15 +6,51 @@ def cmd_t1(args):
     print(json.dumps({"params": {}, "result": res}, ensure_ascii=False, indent=2))
 
 def cmd_t2(args):
-    # Deine bestehende T2 (Cross-Coherence) weiterverwenden:
+    import json, numpy as np
+    from scipy.signal import resample_poly
     from ogc.t2_crosscoherence import coherence_band
-    import numpy as np
-    n = args.n; T = 10.0; fs = n / T
+
+    n = args.n
+    T = 10.0
+    fs = n / T
     t = np.linspace(0, T, n, endpoint=False)
-    x = np.sin(2*np.pi*0.8*t) + 0.5*np.sin(2*np.pi*2.0*t)
-    y = np.sin(2*np.pi*0.8*t + 0.6) + 0.1*np.random.default_rng(args.seed).normal(0, 1, n)
-    res = coherence_band(x, y, fs=fs, band=(0.7,0.9), nperseg=min(512, n//4), n_null=args.n_null, rng=args.seed, mode="mean")
-    print(json.dumps({"params": {"n": n, "n_null": args.n_null, "seed": args.seed}, "result": res}, ensure_ascii=False, indent=2))
+
+    rng = np.random.default_rng(args.seed)
+    # Synthese: 0.8 Hz + etwas Rauschen
+    x = np.sin(2*np.pi*0.8*t) + 0.5*np.sin(2*np.pi*2.0*t) + 0.05 * rng.normal(0, 1, n)
+    y = np.sin(2*np.pi*0.8*t + 0.6) + 0.30 * rng.normal(0, 1, n)
+
+    # --- Downsampling auf ~20 Hz, damit df fein genug wird ---
+    target_fs = 20.0
+    decim = max(1, int(round(fs / target_fs)))
+    x_ds = resample_poly(x, up=1, down=decim)
+    y_ds = resample_poly(y, up=1, down=decim)
+    fs_ds = fs / decim
+    L = len(x_ds)
+
+    # nperseg so wählen, dass mehrere Segmente entstehen (stabiles Welch)
+    K = 5                      # Ziel: ~5 Segmente
+    nperseg = max(128, (L // K))
+    if nperseg % 2 == 1:
+        nperseg += 1
+
+    # Band so wählen, dass IMMER Bins drinliegen (0.6–1.0 Hz ist sicher)
+    band = (0.6, 1.0)
+
+    res = coherence_band(
+        x_ds, y_ds,
+        fs=fs_ds,
+        band=band,
+        nperseg=nperseg,
+        n_null=args.n_null,
+        rng=args.seed,
+        mode="mean"
+    )
+
+    out = {"params": {"n": n, "n_null": args.n_null, "seed": args.seed,
+                      "fs_ds": fs_ds, "nperseg": nperseg, "band": band},
+           "result": res}
+    print(json.dumps(out, ensure_ascii=False, indent=2))
 
 def cmd_t3(args):
     from ogc.tests.t3_hysteresis import hysteresis_loop
