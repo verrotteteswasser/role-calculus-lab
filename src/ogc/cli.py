@@ -1,12 +1,24 @@
 import argparse, json
 
+def _clean_params(args):
+    """Entfernt nicht-serialisierbare Dinge (z.B. args.func) aus argparse-Params."""
+    p = dict(vars(args))
+    p.pop("func", None)  # wichtigste Quelle des Fehlers
+    # optional robust:
+    for k, v in list(p.items()):
+        try:
+            json.dumps(v)
+        except Exception:
+            p[k] = str(v)
+    return p
+
 def cmd_t1(args):
     from ogc.tests.t1_orientation import orientation_identity
     res = orientation_identity(None, None)  # später echte Inputs
-    print(json.dumps({"params": {}, "result": res}, ensure_ascii=False, indent=2))
+    print(json.dumps({"params": _clean_params(args), "result": res}, ensure_ascii=False, indent=2))
 
 def cmd_t2(args):
-    import json, numpy as np
+    import numpy as np
     from scipy.signal import resample_poly
     from ogc.t2_crosscoherence import coherence_band
 
@@ -29,40 +41,43 @@ def cmd_t2(args):
     L = len(x_ds)
 
     # nperseg so wählen, dass mehrere Segmente entstehen (stabiles Welch)
-    K = 6                      # Ziel: ~5 Segmente
+    K = 6                      # Ziel: ~6 Segmente
     nperseg = max(128, (L // K))
     if nperseg % 2 == 1:
         nperseg += 1
 
-    # Band so wählen, dass IMMER Bins drinliegen (0.6–1.0 Hz ist sicher)
+    # Band so wählen, dass Bins drinliegen (um 0.8 Hz)
     band = (0.7, 0.9)
 
     res = coherence_band(
-    x_ds, y_ds,
-    fs=fs_ds,
-    band=band,
-    nperseg=nperseg,
-    n_null=args.n_null,
-    rng=args.seed,
-    mode="mean",
-    null_mode="flip",   # <— wichtig
-)
+        x_ds, y_ds,
+        fs=fs_ds,
+        band=band,
+        nperseg=nperseg,
+        n_null=args.n_null,
+        rng=args.seed,
+        mode="mean",
+        null_mode="flip",   # <— wichtig
+    )
 
-
-    out = {"params": {"n": n, "n_null": args.n_null, "seed": args.seed,
-                      "fs_ds": fs_ds, "nperseg": nperseg, "band": band},
-           "result": res}
+    out = {
+        "params": {
+            "n": n, "n_null": args.n_null, "seed": args.seed,
+            "fs_ds": fs_ds, "nperseg": nperseg, "band": band
+        },
+        "result": res
+    }
     print(json.dumps(out, ensure_ascii=False, indent=2))
 
 def cmd_t3(args):
     from ogc.tests.t3_hysteresis import hysteresis_loop
     res = hysteresis_loop(n=args.n, u_min=args.u_min, u_max=args.u_max, noise=args.noise, seed=args.seed)
-    print(json.dumps({"params": vars(args), "result": res}, ensure_ascii=False, indent=2))
+    print(json.dumps({"params": _clean_params(args), "result": res}, ensure_ascii=False, indent=2))
 
 def cmd_s_margin(args):
     from ogc.tests.s_margin import safety_margin
     res = safety_margin(loss_rate=args.loss, window=args.window)
-    print(json.dumps({"params": vars(args), "result": res}, ensure_ascii=False, indent=2))
+    print(json.dumps({"params": _clean_params(args), "result": res}, ensure_ascii=False, indent=2))
 
 def cmd_split(args):
     from ogc.tests.split_persistence import split_persistence
@@ -70,11 +85,10 @@ def cmd_split(args):
     A = [float(v) for v in args.values_a.split(",")]
     B = [float(v) for v in args.values_b.split(",")]
     res = split_persistence(A, B, tol=args.tol)
-    print(json.dumps({"params": vars(args), "result": res}, ensure_ascii=False, indent=2))
+    print(json.dumps({"params": _clean_params(args), "result": res}, ensure_ascii=False, indent=2))
 
 def cmd_cstar(args):
     from ogc.tests.cstar_longreturn import cstar_return_indicator
-    # Demo: synthetische 0/1 Events; später echte C-Zählserie einspeisen
     import numpy as np
     rng = np.random.default_rng(args.seed)
     base = rng.binomial(1, 0.05, size=args.n).astype(float)
@@ -84,14 +98,15 @@ def cmd_cstar(args):
             base[k:min(k+3, args.n)] += 0.3
         base = np.clip(base, 0, 1)
     res = cstar_return_indicator(base, max_lag=args.max_lag, rng=args.seed)
-    print(json.dumps({"params": vars(args), "result": res}, ensure_ascii=False, indent=2))
+    print(json.dumps({"params": _clean_params(args), "result": res}, ensure_ascii=False, indent=2))
 
 def main():
     p = argparse.ArgumentParser()
     sub = p.add_subparsers()
 
     # T1
-    p1 = sub.add_parser("t1");           p1.set_defaults(func=cmd_t1)
+    p1 = sub.add_parser("t1")
+    p1.set_defaults(func=cmd_t1)
 
     # T2
     p2 = sub.add_parser("t2")
@@ -132,7 +147,11 @@ def main():
     pc.set_defaults(func=cmd_cstar)
 
     args = p.parse_args()
+    if not hasattr(args, "func"):
+        p.print_help()
+        return
     args.func(args)
 
 if __name__ == "__main__":
     main()
+
