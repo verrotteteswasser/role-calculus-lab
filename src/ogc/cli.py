@@ -38,14 +38,16 @@ def cmd_t2(args):
     band = (0.6, 1.0)
 
     res = coherence_band(
-        x_ds, y_ds,
-        fs=fs_ds,
-        band=band,
-        nperseg=nperseg,
-        n_null=args.n_null,
-        rng=args.seed,
-        mode="mean"
-    )
+    x_ds, y_ds,
+    fs=fs_ds,
+    band=band,
+    nperseg=nperseg,
+    n_null=args.n_null,
+    rng=args.seed,
+    mode="mean",
+    null_mode="flip",   # <— neu
+)
+
 
     out = {"params": {"n": n, "n_null": args.n_null, "seed": args.seed,
                       "fs_ds": fs_ds, "nperseg": nperseg, "band": band},
