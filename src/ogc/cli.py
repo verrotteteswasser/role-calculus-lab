@@ -69,27 +69,31 @@ def cmd_t2(args):
     if nperseg % 2 == 1:
         nperseg += 1
 
-    band = (0.7, 0.9)
+    # Band aus CLI-Parametern
+    band = (args.band_min, args.band_max)
 
+    # Null-Hypothesen behandeln
     if args.null_mode == "both":
-        # zwei Null-Modelle auswerten, konservativ kombinieren
         res_flip = coherence_band(
-            x_ds, y_ds, fs=fs_ds, band=band, nperseg=nperseg,
-            n_null=args.n_null, rng=args.seed, mode="mean", null_mode="flip"
+            x_ds, y_ds,
+            fs=fs_ds, band=band, nperseg=nperseg,
+            n_null=args.n_null, rng=args.seed,
+            mode="mean", null_mode="flip"
         )
         res_phase = coherence_band(
-            x_ds, y_ds, fs=fs_ds, band=band, nperseg=nperseg,
-            n_null=args.n_null, rng=args.seed, mode="mean", null_mode="phase"
+            x_ds, y_ds,
+            fs=fs_ds, band=band, nperseg=nperseg,
+            n_null=args.n_null, rng=args.seed,
+            mode="mean", null_mode="phase"
         )
-
         p_flip = res_flip["p_value"]
         p_phase = res_phase["p_value"]
-        p_final = max(p_flip, p_phase)  # konservativ
+        p_final = max(p_flip, p_phase)  # konservativ (beide Nullmodelle bestehen)
 
         res = {
             "stat": res_flip["stat"],
             "band_fraction": res_flip["band_fraction"],
-            "mode": res_flip["mode"],
+            "mode": "mean",
             "null_mode": "both",
             "p_value_flip": p_flip,
             "p_value_phase": p_phase,
@@ -98,10 +102,13 @@ def cmd_t2(args):
         }
     else:
         res = coherence_band(
-            x_ds, y_ds, fs=fs_ds, band=band, nperseg=nperseg,
-            n_null=args.n_null, rng=args.seed, mode="mean", null_mode=args.null_mode
+            x_ds, y_ds,
+            fs=fs_ds, band=band, nperseg=nperseg,
+            n_null=args.n_null, rng=args.seed,
+            mode="mean", null_mode=args.null_mode
         )
 
+    # Ausgabe + Save
     params = _clean_params(args)
     params.update({
         "fs_ds": fs_ds,
@@ -168,6 +175,8 @@ def main():
     p2.add_argument("--n", type=int, default=4096)
     p2.add_argument("--n-null", type=int, default=300)
     p2.add_argument("--seed", type=int, default=0)
+    p2.add_argument("--band-min", type=float, default=0.7)
+    p2.add_argument("--band-max", type=float, default=0.9)
     p2.add_argument(
         "--null-mode",
         choices=["flip", "phase", "both"],
