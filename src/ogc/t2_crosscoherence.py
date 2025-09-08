@@ -2,94 +2,91 @@ import numpy as np
 from scipy.signal import welch, csd
 
 def _mscoh(x, y, fs=1.0, nperseg=512, noverlap=None):
-    """
-    Magnitude-squared coherence via Welch + CSD:
-      Cxy(f) = |Pxy|^2 / (Pxx * Pyy)
-    Robust: passt nperseg/noverlap an die Signal-Länge an.
-    """
-    n = int(min(len(x), len(y)))
-    nseg = int(min(nperseg, n))
-    # Mindestgröße, aber nicht größer als n
-    if nseg < 64:
-        nseg = max(32, min(n, nseg))
-
     if noverlap is None:
-        ov = nseg // 2
-    else:
-        ov = int(noverlap)
-    # Overlap muss strikt kleiner als nperseg sein
-    ov = max(0, min(ov, nseg - 1))
-
-    f, Pxx = welch(x, fs=fs, nperseg=nseg, noverlap=ov, detrend="constant")
-    _, Pyy = welch(y, fs=fs, nperseg=nseg, noverlap=ov, detrend="constant")
-    _, Pxy = csd(x, y, fs=fs, nperseg=nseg, noverlap=ov, detrend="constant")
-
+        noverlap = nperseg // 2
+    f, Pxx = welch(x, fs=fs, nperseg=nperseg, noverlap=noverlap, detrend="constant")
+    _, Pyy = welch(y, fs=fs, nperseg=nperseg, noverlap=noverlap, detrend="constant")
+    _, Pxy = csd(x, y, fs=fs, nperseg=nperseg, noverlap=noverlap, detrend="constant")
     C = (np.abs(Pxy) ** 2) / (Pxx * Pyy + 1e-12)
     C = np.clip(C.real, 0.0, 1.0)
     return f, C
 
 def _phase_surrogate(sig, rng):
-    """
-    Phase-only surrogate: behält das Amplitudenspektrum, randomisiert Phasen.
-    """
     X = np.fft.rfft(sig)
     amp = np.abs(X)
     ph = rng.uniform(0, 2*np.pi, size=amp.shape)
-    # DC/Nyquist real lassen
     ph[0] = 0.0
     if (len(sig) % 2) == 0:
         ph[-1] = 0.0
     Xs = amp * np.exp(1j * ph)
     return np.fft.irfft(Xs, n=len(sig))
 
-# in t2_crosscoherence.py
+def _stat_from_band(x, y, fs, nperseg, band, mode="mean"):
+    f, C = _mscoh(x, y, fs=fs, nperseg=nperseg)
+    mask = (f >= band[0]) & (f <= band[1])
+    Cb = C[mask]
+    if Cb.size == 0:
+        return 0.0, mask.mean()
+    if mode == "peak":
+        return float(Cb.max()), float(mask.mean())
+    else:
+        return float(Cb.mean()), float(mask.mean())
 
-def coherence_band(x, y, fs=1.0, band=(0.6, 1.0), nperseg=512, n_null=200,
-                   rng=None, mode="peak", null_mode="flip", return_debug=False):
+def coherence_band(
+    x, y, fs=1.0, band=(0.6, 1.0), nperseg=512, n_null=200, rng=None,
+    mode="mean", null_mode="phase"  # null_mode: "phase" | "flip" | "both"
+):
+    """
+    Liefert Band-Statistik (mean/peak der Kohärenz) + Nulltests.
+    - 'phase': Phase-only Surrogates beider Signale (strenger Test)
+    - 'flip':  zirkularer Random-Shift von y ggü. x (spektral treu, Kopplung gebrochen)
+               (Bezeichnung 'flip' bleibt zur Rückwärtskompatibilität)
+    - 'both':  beides; liefert p_phase und p_flip
+    """
     rng = np.random.default_rng(rng)
 
-    f, C = _mscoh(x, y, fs=fs, nperseg=nperseg)
-    band_mask = (f >= band[0]) & (f <= band[1])
-    C_band = C[band_mask]
+    stat, band_fraction = _stat_from_band(x, y, fs, nperseg, band, mode=mode)
 
-    if C_band.size == 0:
-        stat = 0.0
-    else:
-        if mode == "mean":
-            stat = float(C_band.mean())
-        else:
-            stat = float(C_band.max())
+    p_phase = None
+    p_flip  = None
 
-    # Null-Verteilung
-    null_stats = np.empty(n_null, dtype=float)
-    for i in range(n_null):
-        if null_mode == "phase":
+    # --- Phase-only Null ---
+    if null_mode in ("phase", "both"):
+        null_stats = []
+        for _ in range(n_null):
             xs = _phase_surrogate(x, rng)
             ys = _phase_surrogate(y, rng)
-        else:
-            # "flip": zyklischer Random-Shift einer Serie -> zerstört Kopplung, erhält Spektren
-            shift = rng.integers(0, len(y))
-            ys = np.roll(y, shift)
-            xs = x
-        _, Cn = _mscoh(xs, ys, fs=fs, nperseg=nperseg)
-        Cn_band = Cn[band_mask]
-        null_stats[i] = (Cn_band.mean() if mode == "mean" else Cn_band.max()) if Cn_band.size else 0.0
+            s, _ = _stat_from_band(xs, ys, fs, nperseg, band, mode=mode)
+            null_stats.append(s)
+        null_stats = np.asarray(null_stats, float)
+        p_phase = float((null_stats >= stat).mean())
 
-    p_value = float((null_stats >= stat).mean())
-    band_fraction = float(band_mask.mean())
+    # --- "Flip" Null = zirkularer Random-Shift ---
+    if null_mode in ("flip", "both"):
+        n = len(y)
+        null_stats = []
+        for _ in range(n_null):
+            k = rng.integers(0, n)   # zufällige Zirkularverschiebung
+            ys = np.roll(y, int(k))
+            s, _ = _stat_from_band(x, ys, fs, nperseg, band, mode=mode)
+            null_stats.append(s)
+        null_stats = np.asarray(null_stats, float)
+        p_flip = float((null_stats >= stat).mean())
 
     out = {
         "stat": stat,
         "band_fraction": band_fraction,
-        "p_value": p_value,
         "mode": mode,
-        "null_mode": null_mode,
     }
-    if return_debug:
-        out["debug"] = {
-            "f": f.tolist(),
-            "C": C.tolist(),
-            "band_mask": band_mask.tolist(),
-            "null_stats": null_stats.tolist(),
-        }
+    if null_mode == "phase":
+        out["p_value"] = p_phase
+        out["null_mode"] = "phase"
+    elif null_mode == "flip":
+        out["p_value"] = p_flip
+        out["null_mode"] = "flip"
+    else:
+        out["p_phase"] = p_phase
+        out["p_flip"]  = p_flip
+        out["null_mode"] = "both"
+
     return out

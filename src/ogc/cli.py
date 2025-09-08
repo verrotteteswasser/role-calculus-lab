@@ -41,22 +41,22 @@ def cmd_t1(args):
     save_path = _save_json(out, args.out_dir, "t1")
     print(f'[saved] {save_path}')
 
+# --- in cmd_t2: both-Logik + Save ---
 def cmd_t2(args):
-    import numpy as np
+    import json, numpy as np
     from scipy.signal import resample_poly
     from ogc.t2_crosscoherence import coherence_band
 
+    # Synthese wie bisher ...
     n = args.n
     T = 30.0
     fs = n / T
     t = np.linspace(0, T, n, endpoint=False)
 
     rng = np.random.default_rng(args.seed)
-    # Synthese: 0.8 Hz + etwas Rauschen
     x = np.sin(2*np.pi*0.8*t) + 0.5*np.sin(2*np.pi*2.0*t) + 0.05 * rng.normal(0, 1, n)
     y = np.sin(2*np.pi*0.8*t + 0.6) + 0.30 * rng.normal(0, 1, n)
 
-    # --- Downsampling auf ~20 Hz, damit df fein genug wird ---
     target_fs = 20.0
     decim = max(1, int(round(fs / target_fs)))
     x_ds = resample_poly(x, up=1, down=decim)
@@ -64,36 +64,55 @@ def cmd_t2(args):
     fs_ds = fs / decim
     L = len(x_ds)
 
-    # nperseg so wählen, dass mehrere Segmente entstehen (stabiles Welch)
-    K = 6                      # Ziel: ~6 Segmente
+    K = 6
     nperseg = max(128, (L // K))
     if nperseg % 2 == 1:
         nperseg += 1
 
-    # Band so wählen, dass Bins drinliegen (um 0.8 Hz)
     band = (0.7, 0.9)
 
-    res = coherence_band(
-        x_ds, y_ds,
-        fs=fs_ds,
-        band=band,
-        nperseg=nperseg,
-        n_null=args.n_null,
-        rng=args.seed,
-        mode="mean",
-        null_mode="flip",   # <— wichtig
-    )
+    if args.null_mode == "both":
+        # ... in cmd_t2, im Zweig args.null_mode == "both"
+res_flip = coherence_band(
+    x_ds, y_ds, fs=fs_ds, band=band, nperseg=nperseg,
+    n_null=args.n_null, rng=args.seed, mode="mean", null_mode="flip"
+)
+res_phase = coherence_band(
+    x_ds, y_ds, fs=fs_ds, band=band, nperseg=nperseg,
+    n_null=args.n_null, rng=args.seed, mode="mean", null_mode="phase"
+)
 
-    out = {
-        "params": {
-            "n": n, "n_null": args.n_null, "seed": args.seed,
-            "fs_ds": fs_ds, "nperseg": nperseg, "band": band
-        },
-        "result": res
-    }
+p_flip  = res_flip["p_value"]
+p_phase = res_phase["p_value"]
+p_final = max(p_flip, p_phase)  # konservativ
+
+res = {
+    "stat": res_flip["stat"],                 # identische Stat-Definition
+    "band_fraction": res_flip["band_fraction"],
+    "mode": res_flip["mode"],
+    "null_mode": "both",
+    "p_value_flip": p_flip,
+    "p_value_phase": p_phase,
+    "p_value_final": p_final,                 # <- entscheidender Wert
+    "decision_alpha_0.05": (p_final < 0.05)   # True = signifikant
+}
+
+    else:
+        res = coherence_band(
+            x_ds, y_ds, fs=fs_ds, band=band, nperseg=nperseg,
+            n_null=args.n_null, rng=args.seed, mode="mean", null_mode=args.null_mode
+        )
+
+    params = _clean_params(args)
+    params.update({
+        "fs_ds": fs_ds,
+        "nperseg": nperseg,
+        "band": list(band),
+    })
+    out = {"params": params, "result": res}
     print(json.dumps(out, ensure_ascii=False, indent=2))
     save_path = _save_json(out, args.out_dir, "t2")
-    print(f'[saved] {save_path}')
+    print(f"[saved] {save_path}")
 
 def cmd_t3(args):
     from ogc.tests.t3_hysteresis import hysteresis_loop
@@ -150,10 +169,16 @@ def main():
 
     # T2
     p2 = sub.add_parser("t2")
-    p2.add_argument("--n", type=int, default=4096)
-    p2.add_argument("--n-null", type=int, default=300)
-    p2.add_argument("--seed", type=int, default=0)
-    p2.set_defaults(func=cmd_t2)
+p2.add_argument("--n", type=int, default=4096)
+p2.add_argument("--n-null", type=int, default=300)
+p2.add_argument("--seed", type=int, default=0)
+p2.add_argument(
+    "--null-mode",
+    choices=["flip", "phase", "both"],
+    default="flip",
+    help="Null-Erzeugung: 'flip' (Segment-Flips), 'phase' (Phase-only Surrogate) oder 'both'"
+)
+p2.set_defaults(func=cmd_t2)
 
     # T3
     p3 = sub.add_parser("t3")
