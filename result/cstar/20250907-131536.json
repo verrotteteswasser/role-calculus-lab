@@ -1,0 +1,15 @@
+{
+  "params": {
+    "out_dir": "result",
+    "n": 6000,
+    "max_lag": 300,
+    "inject_echo": true,
+    "echo_every": 240,
+    "seed": 0
+  },
+  "result": {
+    "stat": 5.6106858729244405e-05,
+    "p_value": 0.445,
+    "tail_mean_acf": 0.000585677702754631
+  }
+}
