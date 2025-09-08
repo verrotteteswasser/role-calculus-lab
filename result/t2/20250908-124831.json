@@ -1,0 +1,27 @@
+{
+  "params": {
+    "out_dir": "result",
+    "n": 12288,
+    "n_null": 5000,
+    "seed": 8,
+    "band_min": 0.7,
+    "band_max": 0.9,
+    "null_mode": "both",
+    "fs_ds": 20.48,
+    "nperseg": 128,
+    "band": [
+      0.7,
+      0.9
+    ]
+  },
+  "result": {
+    "stat": 0.9998187675057512,
+    "band_fraction": 0.015384615384615385,
+    "mode": "mean",
+    "null_mode": "both",
+    "p_value_flip": 0.1718,
+    "p_value_phase": 0.0002,
+    "p_value_final": 0.1718,
+    "decision_alpha_0.05": false
+  }
+}

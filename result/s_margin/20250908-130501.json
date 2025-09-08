@@ -1,0 +1,12 @@
+{
+  "params": {
+    "out_dir": "result",
+    "loss": 0.2,
+    "window": 7.0
+  },
+  "result": {
+    "S": -0.40000000000000013,
+    "loss_rate": 0.2,
+    "window": 7.0
+  }
+}

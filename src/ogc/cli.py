@@ -40,6 +40,7 @@ def cmd_t1(args):
     save_path = _save_json(out, args.out_dir, "t1")
     print(f"[saved] {save_path}")
 
+# --- REPLACE: cmd_t2 ---
 def cmd_t2(args):
     import numpy as np
     from scipy.signal import resample_poly
@@ -55,24 +56,31 @@ def cmd_t2(args):
     x = np.sin(2*np.pi*0.8*t) + 0.5*np.sin(2*np.pi*2.0*t) + 0.05 * rng.normal(0, 1, n)
     y = np.sin(2*np.pi*0.8*t + 0.6) + 0.30 * rng.normal(0, 1, n)
 
-    # Downsampling auf ~20 Hz
-    target_fs = 20.0
+    # Downsampling auf gewünschte Zielrate
+    target_fs = float(args.target_fs)
     decim = max(1, int(round(fs / target_fs)))
     x_ds = resample_poly(x, up=1, down=decim)
     y_ds = resample_poly(y, up=1, down=decim)
     fs_ds = fs / decim
     L = len(x_ds)
 
-    # Welch: mehrere Segmente
-    K = 6
-    nperseg = max(128, (L // K))
-    if nperseg % 2 == 1:
-        nperseg += 1
+    # nperseg: entweder explizit vom User, sonst "auto" via ~6 Segmente
+    if args.nperseg is not None and args.nperseg > 0:
+        nperseg = int(args.nperseg)
+    else:
+        K = 6
+        nperseg = max(128, (L // K))
+        if nperseg % 2 == 1:
+            nperseg += 1
 
-    # Band aus CLI-Parametern
-    band = (args.band_min, args.band_max)
+    # Band vom User, mit sanity checks
+    band_min = float(args.band_min)
+    band_max = float(args.band_max)
+    if band_min <= 0 or band_max <= 0 or band_min >= band_max:
+        raise ValueError(f"bad band: ({band_min}, {band_max})")
+    band = (band_min, band_max)
 
-    # Null-Hypothesen behandeln
+    # Null-Hypothesen
     if args.null_mode == "both":
         res_flip = coherence_band(
             x_ds, y_ds,
@@ -88,7 +96,7 @@ def cmd_t2(args):
         )
         p_flip = res_flip["p_value"]
         p_phase = res_phase["p_value"]
-        p_final = max(p_flip, p_phase)  # konservativ (beide Nullmodelle bestehen)
+        p_final = max(p_flip, p_phase)  # konservativ
 
         res = {
             "stat": res_flip["stat"],
@@ -108,12 +116,11 @@ def cmd_t2(args):
             mode="mean", null_mode=args.null_mode
         )
 
-    # Ausgabe + Save
     params = _clean_params(args)
     params.update({
         "fs_ds": fs_ds,
         "nperseg": nperseg,
-        "band": list(band),
+        "band": [band_min, band_max],
     })
     out = {"params": params, "result": res}
     print(json.dumps(out, ensure_ascii=False, indent=2))
@@ -171,19 +178,21 @@ def main():
     p1.set_defaults(func=cmd_t1)
 
     # T2
+   # --- in main(): Parser für t2 ---
     p2 = sub.add_parser("t2")
     p2.add_argument("--n", type=int, default=4096)
     p2.add_argument("--n-null", type=int, default=300)
     p2.add_argument("--seed", type=int, default=0)
+    p2.add_argument("--null-mode", choices=["flip", "phase", "both"], default="both",
+                    help="Null-Erzeugung: 'flip' (Segment-Flips), 'phase' (Phase-only Surrogates) oder 'both'")
     p2.add_argument("--band-min", type=float, default=0.7)
     p2.add_argument("--band-max", type=float, default=0.9)
-    p2.add_argument(
-        "--null-mode",
-        choices=["flip", "phase", "both"],
-        default="flip",
-        help="Null-Erzeugung: 'flip' (Segment-Flips), 'phase' (Phase-only Surrogates) oder 'both'"
-    )
+    p2.add_argument("--nperseg", type=int, default=None,
+                    help="Welch-Segmentlänge; None=auto (~6 Segmente, min 128)")
+    p2.add_argument("--target-fs", type=float, default=20.0,
+                    help="Ziel-Samplerate fürs Downsampling")
     p2.set_defaults(func=cmd_t2)
+
 
     # T3
     p3 = sub.add_parser("t3")
