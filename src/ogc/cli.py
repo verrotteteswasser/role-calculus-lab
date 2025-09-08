@@ -24,8 +24,7 @@ def _save_json(payload, out_dir, subcmd):
 def _clean_params(args):
     """Entfernt nicht-serialisierbare Dinge (z.B. args.func) aus argparse-Params."""
     p = dict(vars(args))
-    p.pop("func", None)  # wichtigste Quelle des Fehlers
-    # optional robust:
+    p.pop("func", None)
     for k, v in list(p.items()):
         try:
             json.dumps(v)
@@ -39,15 +38,14 @@ def cmd_t1(args):
     out = {"params": _clean_params(args), "result": res}
     print(json.dumps(out, ensure_ascii=False, indent=2))
     save_path = _save_json(out, args.out_dir, "t1")
-    print(f'[saved] {save_path}')
+    print(f"[saved] {save_path}")
 
-# --- in cmd_t2: both-Logik + Save ---
 def cmd_t2(args):
-    import json, numpy as np
+    import numpy as np
     from scipy.signal import resample_poly
     from ogc.t2_crosscoherence import coherence_band
 
-    # Synthese wie bisher ...
+    # Synthese
     n = args.n
     T = 30.0
     fs = n / T
@@ -57,6 +55,7 @@ def cmd_t2(args):
     x = np.sin(2*np.pi*0.8*t) + 0.5*np.sin(2*np.pi*2.0*t) + 0.05 * rng.normal(0, 1, n)
     y = np.sin(2*np.pi*0.8*t + 0.6) + 0.30 * rng.normal(0, 1, n)
 
+    # Downsampling auf ~20 Hz
     target_fs = 20.0
     decim = max(1, int(round(fs / target_fs)))
     x_ds = resample_poly(x, up=1, down=decim)
@@ -64,6 +63,7 @@ def cmd_t2(args):
     fs_ds = fs / decim
     L = len(x_ds)
 
+    # Welch: mehrere Segmente
     K = 6
     nperseg = max(128, (L // K))
     if nperseg % 2 == 1:
@@ -72,31 +72,30 @@ def cmd_t2(args):
     band = (0.7, 0.9)
 
     if args.null_mode == "both":
-        # ... in cmd_t2, im Zweig args.null_mode == "both"
-res_flip = coherence_band(
-    x_ds, y_ds, fs=fs_ds, band=band, nperseg=nperseg,
-    n_null=args.n_null, rng=args.seed, mode="mean", null_mode="flip"
-)
-res_phase = coherence_band(
-    x_ds, y_ds, fs=fs_ds, band=band, nperseg=nperseg,
-    n_null=args.n_null, rng=args.seed, mode="mean", null_mode="phase"
-)
+        # zwei Null-Modelle auswerten, konservativ kombinieren
+        res_flip = coherence_band(
+            x_ds, y_ds, fs=fs_ds, band=band, nperseg=nperseg,
+            n_null=args.n_null, rng=args.seed, mode="mean", null_mode="flip"
+        )
+        res_phase = coherence_band(
+            x_ds, y_ds, fs=fs_ds, band=band, nperseg=nperseg,
+            n_null=args.n_null, rng=args.seed, mode="mean", null_mode="phase"
+        )
 
-p_flip  = res_flip["p_value"]
-p_phase = res_phase["p_value"]
-p_final = max(p_flip, p_phase)  # konservativ
+        p_flip = res_flip["p_value"]
+        p_phase = res_phase["p_value"]
+        p_final = max(p_flip, p_phase)  # konservativ
 
-res = {
-    "stat": res_flip["stat"],                 # identische Stat-Definition
-    "band_fraction": res_flip["band_fraction"],
-    "mode": res_flip["mode"],
-    "null_mode": "both",
-    "p_value_flip": p_flip,
-    "p_value_phase": p_phase,
-    "p_value_final": p_final,                 # <- entscheidender Wert
-    "decision_alpha_0.05": (p_final < 0.05)   # True = signifikant
-}
-
+        res = {
+            "stat": res_flip["stat"],
+            "band_fraction": res_flip["band_fraction"],
+            "mode": res_flip["mode"],
+            "null_mode": "both",
+            "p_value_flip": p_flip,
+            "p_value_phase": p_phase,
+            "p_value_final": p_final,
+            "decision_alpha_0.05": (p_final < 0.05),
+        }
     else:
         res = coherence_band(
             x_ds, y_ds, fs=fs_ds, band=band, nperseg=nperseg,
@@ -120,7 +119,7 @@ def cmd_t3(args):
     out = {"params": _clean_params(args), "result": res}
     print(json.dumps(out, ensure_ascii=False, indent=2))
     save_path = _save_json(out, args.out_dir, "t3")
-    print(f'[saved] {save_path}')
+    print(f"[saved] {save_path}")
 
 def cmd_s_margin(args):
     from ogc.tests.s_margin import safety_margin
@@ -128,25 +127,23 @@ def cmd_s_margin(args):
     out = {"params": _clean_params(args), "result": res}
     print(json.dumps(out, ensure_ascii=False, indent=2))
     save_path = _save_json(out, args.out_dir, "s_margin")
-    print(f'[saved] {save_path}')
+    print(f"[saved] {save_path}")
 
 def cmd_split(args):
     from ogc.tests.split_persistence import split_persistence
-    # Demo: zwei numerische Listen einlesen (Komma-separiert), später ersetzen durch echte Läufe
     A = [float(v) for v in args.values_a.split(",")]
     B = [float(v) for v in args.values_b.split(",")]
     res = split_persistence(A, B, tol=args.tol)
     out = {"params": _clean_params(args), "result": res}
     print(json.dumps(out, ensure_ascii=False, indent=2))
     save_path = _save_json(out, args.out_dir, "split")
-    print(f'[saved] {save_path}')
+    print(f"[saved] {save_path}")
 
 def cmd_cstar(args):
     from ogc.tests.cstar_longreturn import cstar_return_indicator
     import numpy as np
     rng = np.random.default_rng(args.seed)
     base = rng.binomial(1, 0.05, size=args.n).astype(float)
-    # füge schwache Langzeitstruktur hinzu
     if args.inject_echo:
         for k in range(args.echo_every, args.n, args.echo_every):
             base[k:min(k+3, args.n)] += 0.3
@@ -155,11 +152,10 @@ def cmd_cstar(args):
     out = {"params": _clean_params(args), "result": res}
     print(json.dumps(out, ensure_ascii=False, indent=2))
     save_path = _save_json(out, args.out_dir, "cstar")
-    print(f'[saved] {save_path}')
+    print(f"[saved] {save_path}")
 
 def main():
     p = argparse.ArgumentParser()
-    # globales Output-Verzeichnis (du hast „result/“ schon)
     p.add_argument("--out-dir", type=str, default="result", help="Basisordner für JSON-Outputs")
     sub = p.add_subparsers()
 
@@ -169,16 +165,16 @@ def main():
 
     # T2
     p2 = sub.add_parser("t2")
-p2.add_argument("--n", type=int, default=4096)
-p2.add_argument("--n-null", type=int, default=300)
-p2.add_argument("--seed", type=int, default=0)
-p2.add_argument(
-    "--null-mode",
-    choices=["flip", "phase", "both"],
-    default="flip",
-    help="Null-Erzeugung: 'flip' (Segment-Flips), 'phase' (Phase-only Surrogate) oder 'both'"
-)
-p2.set_defaults(func=cmd_t2)
+    p2.add_argument("--n", type=int, default=4096)
+    p2.add_argument("--n-null", type=int, default=300)
+    p2.add_argument("--seed", type=int, default=0)
+    p2.add_argument(
+        "--null-mode",
+        choices=["flip", "phase", "both"],
+        default="flip",
+        help="Null-Erzeugung: 'flip' (Segment-Flips), 'phase' (Phase-only Surrogates) oder 'both'"
+    )
+    p2.set_defaults(func=cmd_t2)
 
     # T3
     p3 = sub.add_parser("t3")
