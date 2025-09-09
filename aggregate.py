@@ -1,174 +1,225 @@
-#!/usr/bin/env python3
-"""
-Aggregate OGC experiment outputs.
-
-Usage:
-  python aggregate.py                 # scan ./result
-  python aggregate.py --root result   # explicit root
-Creates:
-  result/summary/t2_rows.csv
-  result/summary/t3_rows.csv
-  result/summary/cstar_rows.csv
-  result/summary/quick_report.txt
-"""
-
-from __future__ import annotations
-import argparse, csv, json, os, sys, math
+# aggregate.py
+import json, os, glob, math
+from pathlib import Path
 from datetime import datetime
-from typing import Dict, Any, List, Tuple
 
-def _flatten(prefix: str, obj: Any, out: Dict[str, Any]):
-    if isinstance(obj, dict):
-        for k, v in obj.items():
-            _flatten(f"{prefix}{k}.", v, out)
-    elif isinstance(obj, list):
-        out[prefix[:-1]] = json.dumps(obj, ensure_ascii=False)
+def _load_json(path):
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+# ---------- T2: Cross-Coherence ----------
+def _extract_t2_row(js, path):
+    P = js.get("params", {}) or {}
+    R = js.get("result", {}) or {}
+
+    # null_mode kann in result oder params stecken
+    null_mode = (R.get("null_mode") or P.get("null_mode") or "flip")
+
+    # p-Wert korrekt wählen
+    if "p_value_final" in R:
+        p = R["p_value_final"]
+    elif null_mode == "both":
+        # Fallback: streng nach Definition = max(flip, phase)
+        p = max(
+            R.get("p_value_flip", float("nan")),
+            R.get("p_value_phase", float("nan")),
+        )
     else:
-        out[prefix[:-1]] = obj
+        # Einzel-Null: nimm vorhandenes Feld
+        p = (
+            R.get("p_value",
+            R.get("p_value_flip",
+            R.get("p_value_phase", float("nan"))))
+        )
 
-def load_rows(root: str) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]:
-    t2_rows: List[Dict[str, Any]] = []
-    t3_rows: List[Dict[str, Any]] = []
-    cstar_rows: List[Dict[str, Any]] = []
+    # Band-Grenzen robust ziehen (neuere CLI hat band_min/max; sonst 'band')
+    band_min = P.get("band_min")
+    band_max = P.get("band_max")
+    if (band_min is None or band_max is None) and isinstance(P.get("band"), (list, tuple)) and len(P["band"]) == 2:
+        band_min, band_max = P["band"]
 
-    for dirpath, _, filenames in os.walk(root):
-        for fn in filenames:
-            if not fn.lower().endswith(".json"):
-                continue
-            fpath = os.path.join(dirpath, fn)
-            try:
-                with open(fpath, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-            except Exception as e:
-                print(f"[skip] cannot parse {fpath}: {e}", file=sys.stderr)
-                continue
+    return {
+        "file": str(path),
+        "seed": P.get("seed"),
+        "n": P.get("n"),
+        "n_null": P.get("n_null"),
+        "null_mode": null_mode,
+        "mode": R.get("mode") or P.get("mode"),
+        "stat": R.get("stat"),
+        "band_fraction": R.get("band_fraction"),
+        "p_value": p,                          # <- zentrale Spalte für Auswertung
+        "p_value_flip": R.get("p_value_flip"),
+        "p_value_phase": R.get("p_value_phase"),
+        "p_value_final": R.get("p_value_final"),
+        "decision_alpha_0.05": R.get("decision_alpha_0.05"),
+        "fs_ds": P.get("fs_ds"),
+        "target_fs": P.get("target_fs"),
+        "nperseg": P.get("nperseg"),
+        "band_min": band_min,
+        "band_max": band_max,
+    }
 
-            row: Dict[str, Any] = {"file": os.path.relpath(fpath, root)}
-            try:
-                st = os.stat(fpath)
-                row["mtime"] = datetime.fromtimestamp(st.st_mtime).isoformat(timespec="seconds")
-            except:
-                pass
+# ---------- T3: Hysteresis ----------
+def _extract_t3_row(js, path):
+    P = js.get("params", {}) or {}
+    R = js.get("result", {}) or {}
 
-            if isinstance(data, dict):
-                if "params" in data:
-                    _flatten("params.", data["params"], row)
-                if "result" in data:
-                    _flatten("result.", data["result"], row)
+    return {
+        "file": str(path),
+        "seed": P.get("seed"),
+        "n": P.get("n"),
+        "u_min": P.get("u_min"),
+        "u_max": P.get("u_max"),
+        "noise": P.get("noise"),
+        "Theta_up": R.get("Theta_up"),
+        "Theta_down": R.get("Theta_down"),
+        "A_loop": R.get("A_loop"),
+    }
 
-            dlow = dirpath.lower()
-            if "t2" in dlow or "p_value_flip" in json.dumps(data, ensure_ascii=False):
-                t2_rows.append(row)
-            elif "t3" in dlow or "Theta_up" in json.dumps(data, ensure_ascii=False):
-                t3_rows.append(row)
-            elif "cstar" in dlow or "tail_mean_acf" in json.dumps(data, ensure_ascii=False):
-                cstar_rows.append(row)
-            else:
-                if any(k.startswith("result.p_value") for k in row):
-                    t2_rows.append(row)
-                elif "result.A_loop" in row:
-                    t3_rows.append(row)
-                else:
-                    cstar_rows.append(row)
+# ---------- C*: Long-return ----------
+def _extract_cstar_row(js, path):
+    P = js.get("params", {}) or {}
+    R = js.get("result", {}) or {}
 
-    return t2_rows, t3_rows, cstar_rows
+    return {
+        "file": str(path),
+        "seed": P.get("seed"),
+        "n": P.get("n"),
+        "max_lag": P.get("max_lag"),
+        "inject_echo": P.get("inject_echo"),
+        "echo_every": P.get("echo_every"),
+        "stat": R.get("stat"),
+        "tail_mean_acf": R.get("tail_mean_acf"),
+        "p_value": R.get("p_value"),
+    }
 
-def _write_csv(rows: List[Dict[str, Any]], out_path: str):
-    if not rows:
-        return
-    keys: List[str] = []
-    seen = set()
-    for r in rows:
-        for k in r.keys():
-            if k not in seen:
-                seen.add(k)
-                keys.append(k)
-    os.makedirs(os.path.dirname(out_path), exist_ok=True)
-    with open(out_path, "w", newline="", encoding="utf-8") as f:
-        w = csv.DictWriter(f, fieldnames=keys)
-        w.writeheader()
-        for r in rows:
-            w.writerow(r)
+def _detect_kind(js, path):
+    """Erkenne JSON-Typ robust über Felder und (optional) Pfad."""
+    R = (js.get("result") or {})
+    # Feld-basierte Heuristik
+    if "A_loop" in R or ("Theta_up" in R and "Theta_down" in R):
+        return "t3"
+    if "tail_mean_acf" in R:
+        return "cstar"
+    if ("band_fraction" in R and "stat" in R) or ("p_value_final" in R or "p_value_flip" in R or "p_value_phase" in R):
+        return "t2"
+    # Pfad-Fallback
+    p = str(path).lower()
+    if "/t2/" in p or "\\t2\\" in p: return "t2"
+    if "/t3/" in p or "\\t3\\" in p: return "t3"
+    if "/cstar/" in p or "\\cstar\\" in p: return "cstar"
+    return "unknown"
 
-def _nanmean(xs: List[float]) -> float:
-    xs2 = [x for x in xs if isinstance(x, (int, float)) and not math.isnan(x)]
-    return sum(xs2)/len(xs2) if xs2 else float("nan")
+def _fmt_float(x, digits=6):
+    if x is None or (isinstance(x, float) and math.isnan(x)):
+        return "nan"
+    return f"{x:.{digits}g}"
 
-def summarize_t2(rows: List[Dict[str, Any]]) -> str:
-    if not rows:
-        return "T2: no files found."
-    pcol = "result.p_value_final"
-    if pcol not in rows[0]:
-        if "result.p_value" in rows[0]: pcol = "result.p_value"
-        elif "result.p_value_flip" in rows[0]: pcol = "result.p_value_flip"
-    ps = [float(r.get(pcol, "nan")) for r in rows]
-    sig = [(str(r.get("result.decision_alpha_0.05","")).lower()=="true") or (float(r.get(pcol,1.0))<0.05) for r in rows]
-    stat_mean = _nanmean([float(r.get("result.stat","nan")) for r in rows])
-    return (
-        f"T2 files: {len(rows)}\n"
-        f"  mean stat: {stat_mean:.6f}\n"
-        f"  mean {pcol}: {_nanmean(ps):.6f}\n"
-        f"  min p: {min(ps):.6f}  max p: {max(ps):.6f}\n"
-        f"  significant @0.05: {sum(1 for s in sig if s)}/{len(sig)} ({100*sum(1 for s in sig if s)/len(sig):.1f}%)\n"
-    )
+def main(root="result"):
+    root = Path(root)
+    t2_rows, t3_rows, cstar_rows = [], [], []
 
-def summarize_t3(rows: List[Dict[str, Any]]) -> str:
-    if not rows:
-        return "T3: no files found."
-    A = [float(r.get("result.A_loop","nan")) for r in rows]
-    return (
-        f"T3 files: {len(rows)}\n"
-        f"  mean A_loop: {_nanmean(A):.6f}\n"
-        f"  min A_loop: {min(A):.6f}  max A_loop: {max(A):.6f}\n"
-        f"  Theta_up range: {min(float(r.get('result.Theta_up','nan')) for r in rows):.6f} .. "
-        f"{max(float(r.get('result.Theta_up','nan')) for r in rows):.6f}\n"
-    )
+    # Alle JSONs einsammeln
+    for path in root.rglob("*.json"):
+        try:
+            js = _load_json(path)
+        except Exception:
+            continue
+        kind = _detect_kind(js, path)
+        try:
+            if kind == "t2":
+                t2_rows.append(_extract_t2_row(js, path))
+            elif kind == "t3":
+                t3_rows.append(_extract_t3_row(js, path))
+            elif kind == "cstar":
+                cstar_rows.append(_extract_cstar_row(js, path))
+        except Exception:
+            # skip kaputte Einträge, aber nicht crashen
+            continue
 
-def summarize_cstar(rows: List[Dict[str, Any]]) -> str:
-    if not rows:
-        return "C*: no files found."
-    p = [float(r.get("result.p_value","nan")) for r in rows]
-    stat = [float(r.get("result.stat","nan")) for r in rows]
-    tail = [float(r.get("result.tail_mean_acf","nan")) for r in rows]
-    return (
-        f"C* files: {len(rows)}\n"
-        f"  mean stat: {_nanmean(stat):.6f}\n"
-        f"  mean p_value: {_nanmean(p):.6f}\n"
-        f"  mean tail_mean_acf: {_nanmean(tail):.6f}\n"
-        f"  significant @0.05: {sum(1 for x in p if x<0.05)}/{len(p)} "
-        f"({100*sum(1 for x in p if x<0.05)/len(p):.1f}%)\n"
-    )
+    # Ausgabeordner
+    summary_dir = root / "summary"
+    summary_dir.mkdir(parents=True, exist_ok=True)
 
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--root", default="result", help="Root directory to scan")
-    args = ap.parse_args()
+    # CSVs schreiben
+    def _write_csv(rows, out_path, header=None):
+        if not rows:
+            return
+        if header is None:
+            # Header aus Union aller Keys
+            keys = []
+            seen = set()
+            for r in rows:
+                for k in r.keys():
+                    if k not in seen:
+                        seen.add(k); keys.append(k)
+        else:
+            keys = header
+        with open(out_path, "w", encoding="utf-8") as f:
+            f.write(",".join(keys) + "\n")
+            for r in rows:
+                vals = []
+                for k in keys:
+                    v = r.get(k)
+                    if isinstance(v, float):
+                        vals.append(_fmt_float(v))
+                    else:
+                        vals.append("" if v is None else str(v))
+                f.write(",".join(vals) + "\n")
 
-    root = args.root
-    t2_rows, t3_rows, cstar_rows = load_rows(root)
+    if t2_rows:
+        _write_csv(t2_rows, summary_dir / "t2_rows.csv")
+    if t3_rows:
+        _write_csv(t3_rows, summary_dir / "t3_rows.csv")
+    if cstar_rows:
+        _write_csv(cstar_rows, summary_dir / "cstar_rows.csv")
 
-    summary_dir = os.path.join(root, "summary")
-    os.makedirs(summary_dir, exist_ok=True)
+    # Quick-Report
+    lines = []
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    lines.append(f"# Quick report ({now})\n")
 
-    _write_csv(t2_rows,   os.path.join(summary_dir, "t2_rows.csv"))
-    _write_csv(t3_rows,   os.path.join(summary_dir, "t3_rows.csv"))
-    _write_csv(cstar_rows,os.path.join(summary_dir, "cstar_rows.csv"))
+    if t2_rows:
+        ps = [r["p_value"] for r in t2_rows if isinstance(r.get("p_value"), (int, float)) and not math.isnan(r["p_value"])]
+        alpha_hits = sum(1 for r in t2_rows if r.get("decision_alpha_0.05") is True)
+        lines += [
+            "== T2 Cross-Coherence ==",
+            f"runs: {len(t2_rows)}",
+            f"mean p: {_fmt_float(sum(ps)/len(ps)) if ps else 'nan'}",
+            f"min p: {_fmt_float(min(ps)) if ps else 'nan'}",
+            f"max p: {_fmt_float(max(ps)) if ps else 'nan'}",
+            f"alpha=0.05 rejects: {alpha_hits}/{len(t2_rows)}",
+            "",
+        ]
 
-    report = "\n".join([
-        f"Scan root: {os.path.abspath(root)}",
-        f"Generated: {datetime.now().isoformat(timespec='seconds')}",
-        "",
-        summarize_t2(t2_rows),
-        summarize_t3(t3_rows),
-        summarize_cstar(cstar_rows),
-    ])
+    if t3_rows:
+        As = [r["A_loop"] for r in t3_rows if isinstance(r.get("A_loop"), (int, float))]
+        lines += [
+            "== T3 Hysteresis ==",
+            f"runs: {len(t3_rows)}",
+            f"mean A_loop: {_fmt_float(sum(As)/len(As)) if As else 'nan'}",
+            f"min A_loop: {_fmt_float(min(As)) if As else 'nan'}",
+            f"max A_loop: {_fmt_float(max(As)) if As else 'nan'}",
+            "",
+        ]
 
-    rpt_path = os.path.join(summary_dir, "quick_report.txt")
-    with open(rpt_path, "w", encoding="utf-8") as f:
-        f.write(report)
+    if cstar_rows:
+        ps = [r["p_value"] for r in cstar_rows if isinstance(r.get("p_value"), (int, float))]
+        lines += [
+            "== C* Long-return ==",
+            f"runs: {len(cstar_rows)}",
+            f"mean p: {_fmt_float(sum(ps)/len(ps)) if ps else 'nan'}",
+            f"min p: {_fmt_float(min(ps)) if ps else 'nan'}",
+            f"max p: {_fmt_float(max(ps)) if ps else 'nan'}",
+            "",
+        ]
 
-    print(report)
-    print(f"[saved] {rpt_path}")
+    with open(summary_dir / "quick_report.txt", "w", encoding="utf-8") as f:
+        f.write("\n".join(lines))
+
+    print(f"[ok] wrote:\n  {summary_dir/'t2_rows.csv' if t2_rows else '-'}\n  {summary_dir/'t3_rows.csv' if t3_rows else '-'}\n  {summary_dir/'cstar_rows.csv' if cstar_rows else '-'}\n  {summary_dir/'quick_report.txt'}")
 
 if __name__ == "__main__":
-    main()
+    # optional: root via ENV oder Default "result"
+    main(root=os.environ.get("OGC_RESULT_ROOT", "result"))
+
