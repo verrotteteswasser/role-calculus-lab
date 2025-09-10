@@ -205,3 +205,41 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# --- role-calculus-lab: Results & Data (projekt-spezifisch) ---
+
+# Root-level results (alles ignorieren, aber JSON/CSV/TXT mit reinnehmen)
+result/**
+!result/**/*.json
+!result/**/*.csv
+!result/**/*.txt
+
+# Falls Ergebnisse unter src/ogc/result/ landen:
+src/ogc/result/**
+!src/ogc/result/**/*.json
+!src/ogc/result/**/*.csv
+!src/ogc/result/**/*.txt
+
+# (optional) Dataverzeichnis: Track nur leichte, textbasierte Artefakte
+data/**
+!data/**/*.json
+!data/**/*.csv
+!data/**/*.txt
+
+# (optional) Scratch/Temp – komplett ignorieren, außer Marker
+scratch/**
+!scratch/.gitkeep
+
+# Große Binärformate grundsätzlich nicht versionieren
+*.zip
+*.tar
+*.tar.gz
+*.7z
+*.npz
+*.npy
+*.wav
+*.png
+*.jpg
+*.jpeg
+*.pdf
+
