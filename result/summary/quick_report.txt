@@ -1,19 +1,20 @@
-Scan root: E:\Existenz\role-calculus-lab\result
-Generated: 2025-09-08T18:13:30
+# Quick report (2025-09-09 18:57:54)
 
-T2 files: 95
-  mean stat: 0.999779
-  mean result.p_value: 0.132000
-  min p: 0.132000  max p: 0.132000
-  significant @0.05: 16/95 (16.8%)
+== T2 Cross-Coherence ==
+runs: 95
+mean p: 0.0993318
+min p: 0.0047
+max p: 0.253
+alpha=0.05 rejects: 16/95
 
-T3 files: 13
-  mean A_loop: 2.829972
-  min A_loop: 2.817316  max A_loop: 2.853631
-  Theta_up range: 0.053512 .. 2.000000
+== T3 Hysteresis ==
+runs: 13
+mean A_loop: 2.82997
+min A_loop: 2.81732
+max A_loop: 2.85363
 
-C* files: 21
-  mean stat: -0.000014
-  mean p_value: 0.440833
-  mean tail_mean_acf: 0.000246
-  significant @0.05: 1/21 (4.8%)
+== C* Long-return ==
+runs: 12
+mean p: 0.440833
+min p: 0.045
+max p: 0.905
