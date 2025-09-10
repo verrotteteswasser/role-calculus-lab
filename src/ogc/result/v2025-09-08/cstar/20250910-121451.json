@@ -1,0 +1,18 @@
+{
+  "schema_version": "cstar-v1",
+  "task": "cstar",
+  "params": {
+    "out_dir": "result",
+    "tag": "v2025-09-08",
+    "n": 8000,
+    "max_lag": 400,
+    "inject_echo": false,
+    "echo_every": 250,
+    "seed": 5
+  },
+  "result": {
+    "stat": -0.00045156014240810375,
+    "p_value": 0.665,
+    "tail_mean_acf": -0.0002793114362625105
+  }
+}
