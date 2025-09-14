@@ -1,86 +1,120 @@
+# ogc/tests/t3_hysteresis.py
+
 import numpy as np
-import json
-from pathlib import Path
-from scipy.signal import welch
+from typing import Dict, Any, Tuple
+from scipy.signal import welch, csd
 
-def coherence_band(x, y, fs, band, nperseg=None):
-    """Compute band-mean coherence between x and y."""
-    f, Pxx = welch(x, fs=fs, nperseg=nperseg)
-    f, Pyy = welch(y, fs=fs, nperseg=nperseg)
-    f, Pxy = welch(x, fs=fs, nperseg=nperseg)  # Placeholder: use real cross-spectral estimator
-    coh = np.abs(Pxy)**2 / (Pxx * Pyy + 1e-12)
+def _mscoh(x: np.ndarray, y: np.ndarray, fs: float, nperseg: int) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Magnitude-squared coherence via Welch estimates:
+      Cxy(f) = |Pxy|^2 / (Pxx * Pyy)
+    Rückgabe: (f, Cxy)
+    """
+    noverlap = max(0, nperseg // 2)
+    f, Pxx = welch(x, fs=fs, nperseg=nperseg, noverlap=noverlap, detrend="constant")
+    _, Pyy = welch(y, fs=fs, nperseg=nperseg, noverlap=noverlap, detrend="constant")
+    _, Pxy = csd(x, y, fs=fs, nperseg=nperseg, noverlap=noverlap, detrend="constant")
+    C = (np.abs(Pxy) ** 2) / (Pxx * Pyy + 1e-12)
+    C = np.clip(C.real, 0.0, 1.0)
+    return f, C
+
+def _band_stat(x: np.ndarray, y: np.ndarray, fs: float, band: Tuple[float, float], nperseg: int, mode: str = "mean") -> float:
+    f, C = _mscoh(x, y, fs=fs, nperseg=nperseg)
     mask = (f >= band[0]) & (f <= band[1])
-    return coh[mask].mean()
+    if not mask.any():
+        return 0.0
+    Cb = C[mask]
+    return float(Cb.max() if mode == "peak" else Cb.mean())
 
-def run_hysteresis(x, y, fs, band_range=(0.5, 1.0), n_steps=20, nperseg=None, out_dir=None, seed=0):
+def hysteresis_loop(
+    n: int = 300,
+    u_min: float = 0.5,
+    u_max: float = 1.0,
+    noise: float = 0.0,
+    seed: int = 0,
+    fs: float = 20.0,
+    nperseg: int = 128,
+    base_band: Tuple[float, float] = (0.78, 0.82),
+    n_steps: int = 21,
+    sweep: str = "low_edge",  # "low_edge" | "high_edge" | "width"
+    mode: str = "mean",       # "mean" | "peak"
+) -> Dict[str, Any]:
     """
-    Run hysteresis test: sweep band edge forward and backward.
-    """
-    np.random.seed(seed)
-    band_min, band_max = band_range
-    steps = np.linspace(band_min, band_max, n_steps)
+    T3 Hysterese-Test:
+      - Wir sweepen einen Band-Parameter (z.B. untere Kante) aufwärts und abwärts.
+      - Messen pro Schritt die Band-Kohärenz.
+      - Hysterese-Maß: Fläche zwischen Vorwärts- und Rückwärtskurve (A_loop).
 
-    forward = []
-    for b in steps:
-        val = coherence_band(x, y, fs, (b, band_max), nperseg=nperseg)
+    Rückgabe-Format (kompatibel mit deinem aggregate.py):
+      result = {
+        "forward": [...],
+        "backward": [...],
+        "u_grid": [...],      # Parameterwerte
+        "A_loop": float,      # Fläche zwischen den Kurven
+        "band_base": [f1,f2], # Basisband
+        "sweep": "low_edge" | "high_edge" | "width",
+        "mode": "mean" | "peak"
+      }
+    """
+    rng = np.random.default_rng(seed)
+
+    # --- Demo-Synthese (ersetzbar durch echte Daten, wenn vorhanden) ---
+    # eine 0.8 Hz-Komponente + optionale Störung
+    t = np.arange(n) / fs
+    x = np.sin(2*np.pi*0.8*t) + noise * rng.standard_normal(n)
+    y = np.sin(2*np.pi*0.8*t + 0.25) + noise * rng.standard_normal(n)
+
+    # Parameter-Gitter
+    u_grid = np.linspace(u_min, u_max, n_steps)
+
+    f1, f2 = base_band
+    forward, backward = [], []
+
+    # Vorwärts-Sweep
+    for u in u_grid:
+        if sweep == "low_edge":
+            band = (u, f2)
+        elif sweep == "high_edge":
+            band = (f1, u)
+        else:  # "width"
+            width = (f2 - f1) * u
+            mid = 0.5 * (f1 + f2)
+            band = (mid - 0.5 * width, mid + 0.5 * width)
+        val = _band_stat(x, y, fs=fs, band=band, nperseg=nperseg, mode=mode)
         forward.append(val)
 
-    backward = []
-    for b in steps[::-1]:
-        val = coherence_band(x, y, fs, (b, band_max), nperseg=nperseg)
+    # Rückwärts-Sweep
+    for u in u_grid[::-1]:
+        if sweep == "low_edge":
+            band = (u, f2)
+        elif sweep == "high_edge":
+            band = (f1, u)
+        else:
+            width = (f2 - f1) * u
+            mid = 0.5 * (f1 + f2)
+            band = (mid - 0.5 * width, mid + 0.5 * width)
+        val = _band_stat(x, y, fs=fs, band=band, nperseg=nperseg, mode=mode)
         backward.append(val)
 
-    # simple hysteresis metric = area between curves
-    hysteresis_area = float(np.trapz(np.abs(np.array(forward) - np.array(backward)), steps))
+    forward = np.asarray(forward, dtype=float)
+    backward = np.asarray(backward, dtype=float)
+    # Fläche zwischen den Kurven (numerische Integration)
+    A_loop = float(np.trapz(np.abs(forward - backward), u_grid))
 
-    result = {
-        "params": {
-            "fs": fs,
-            "band_range": band_range,
-            "n_steps": n_steps,
-            "nperseg": nperseg,
-            "seed": seed
-        },
-        "result": {
-            "forward": forward,
-            "backward": backward,
-            "hysteresis_area": hysteresis_area,
-            "mode": "T3",
-            "null_mode": "none"
-        }
+    return {
+        "forward": forward.tolist(),
+        "backward": backward.tolist(),
+        "u_grid": u_grid.tolist(),
+        "A_loop": A_loop,
+        "band_base": [float(f1), float(f2)],
+        "sweep": sweep,
+        "mode": mode,
+        # Meta hilfreich für spätere Plots:
+        "fs": float(fs),
+        "nperseg": int(nperseg),
+        "n": int(n),
+        "seed": int(seed),
+        "noise": float(noise),
     }
 
-    if out_dir:
-        Path(out_dir).mkdir(parents=True, exist_ok=True)
-        out_file = Path(out_dir) / f"T3_seed{seed:03d}.json"
-        with open(out_file, "w", encoding="utf-8") as f:
-            json.dump(result, f, indent=2)
 
-    return result
-
-# CLI-style entrypoint (so it works with your cli.py setup)
-if __name__ == "__main__":
-    import argparse
-    parser = argparse.ArgumentParser(description="Run T3 Hysteresis test")
-    parser.add_argument("--out", type=str, required=True, help="Output directory for JSONs")
-    parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--fs", type=float, default=20.0)
-    parser.add_argument("--band_min", type=float, default=0.5)
-    parser.add_argument("--band_max", type=float, default=1.0)
-    parser.add_argument("--n_steps", type=int, default=20)
-    parser.add_argument("--nperseg", type=int, default=None)
-    args = parser.parse_args()
-
-    # Placeholder: replace with real data loading
-    N = 2000
-    t = np.arange(N) / args.fs
-    x = np.sin(2 * np.pi * 0.8 * t) + 0.1 * np.random.randn(N)
-    y = np.sin(2 * np.pi * 0.8 * t + 0.2) + 0.1 * np.random.randn(N)
-
-    run_hysteresis(x, y,
-                   fs=args.fs,
-                   band_range=(args.band_min, args.band_max),
-                   n_steps=args.n_steps,
-                   nperseg=args.nperseg,
-                   out_dir=args.out,
-                   seed=args.seed)
