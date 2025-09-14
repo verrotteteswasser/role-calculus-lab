@@ -1,16 +1,39 @@
-OGC Testkit – Independent Validation Lab
+\# Role Calculus – Repro Pack (T2 Power \& Nulls)
 
-This repository hosts the independent testbed for the role-calculus framework (O–G–C).
-The aim is to reproduce, validate, and extend the results using published datasets and transparent simulations.
 
-Scope
 
-T1 Orientation (Identity check): radial slopes, Gauss law identities.
+\## Requirements
 
-T2 Coherence (Cross-spectra): $C_1(k)$ bands, null shuffles.
+\- Python 3.10+ (getestet mit 3.13)
 
-T3 Hysteresis & Plateaus: thresholds $(\Theta_\uparrow, \Theta_\downarrow)$, loop areas, dwell times.
+\- numpy, scipy
 
-Dynamic Cycles: experimental number-doubling systems (3–6–9 pattern, esoteric analogies).
 
-All tests are designed to be minimal surprise implementations: open-source code, bootstrap/jackknife CIs, and reproducible null pipelines.
+
+```bash
+
+pip install -U numpy scipy
+
+
+# Role-Calculus Lab – T2 Coherence Tests
+
+## Quick start
+```powershell
+# Beispiel: 50 seeds, konservativer "both"-Test, 5k Surrogates
+$OUT = "result\v2025-09-10_powerT2_both"
+foreach ($s in 0..49) {
+  python -m ogc.cli --out-dir $OUT t2 `
+    --n 24576 --n-null 5000 --seed $s `
+    --null-mode both `
+    --band-min 0.78 --band-max 0.82
+}
+
+# Phase-only Vergleich
+$OUTP = "result\v2025-09-10_powerT2_phase"
+foreach ($s in 0..49) {
+  python -m ogc.cli --out-dir $OUTP t2 `
+    --n 24576 --n-null 5000 --seed $s `
+    --null-mode phase `
+    --band-min 0.78 --band-max 0.82
+}
+
